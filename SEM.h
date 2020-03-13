@@ -6,6 +6,7 @@
 #include <eigen3/Eigen/Dense>
 #include <eigen3/unsupported/Eigen/MatrixFunctions>
 #include <boost/algorithm/string.hpp>
+#include <fstream>
 //#include <boost/math/tools/minima.hpp>
 using namespace Eigen;
 
@@ -83,8 +84,7 @@ void SEM_vertex::RemoveNeighbor(SEM_vertex * v) {
 }
 
 class clique {
-	
-public:
+	public:	
 	map <clique *, float> logScalingFactorForMessages;
 	float logScalingFactorForClique;
 	map <clique *, std::array <float, 4>> messagesFromNeighbors;
@@ -939,7 +939,7 @@ public:
 	int numberOfObservedVertices;
 	int numberOfExternalVertices = 0;	
 	int numberOfSitePatterns;
-	double logLikelihoodConvergenceThreshold = 0.01;
+	double logLikelihoodConvergenceThreshold = 0.1;
 	float sumOfExpectedLogLikelihoods = 0;
 	float maxSumOfExpectedLogLikelihoods = 0;
 	int h_ind = 1;
@@ -967,6 +967,7 @@ public:
 	bool finalIterationOfSEM;
 	map <string, int> nameToIdMap;
 	string sequenceFileName;
+	string ancestralSequencesString = "";
 	float sequenceLength;
 	// Add vertices (and compressed sequence for leaves)
 	array <float, 4> rootProbability;
@@ -1008,6 +1009,7 @@ public:
 	void AddSitePatternWeights(vector <int> sitePatternWeightsToAdd);
 	void AddSitePatternRepeats(vector <vector <int> > sitePatternRepetitionsToAdd);
 	void AddSequences(vector <vector <unsigned char>> sequencesToAdd);
+	void OpenAncestralSequencesFile();
 	void AddRootVertex();
 //	void AddCompressedSequencesAndNames(map<string,vector<unsigned char>> sequencesList, vector <vector <int>> sitePatternRepeats);
 	void AddAllSequences(string sequencesFileName);
@@ -1021,6 +1023,7 @@ public:
 	void RootTreeBySumOfExpectedLogLikelihoods();
 	void ComputeSumOfExpectedLogLikelihoods();
 	void RootTreeAlongEdge(SEM_vertex * u, SEM_vertex * v);
+	void SelectEdgeIncidentToVertexViaMLUnderGMModel(SEM_vertex * v);
 	void InitializeTransitionMatricesAndRootProbability();
 	void ComputeMAPEstimateOfAncestralSequencesUsingHardEM();
 	void ComputeMPEstimateOfAncestralSequences();
@@ -1088,7 +1091,7 @@ public:
 	void NelderMeadForOptimizingParametersForRateCat(int rateCat, int n, double start[], double xmin[], 
 		 double *ynewlo, double reqmin, double step[], int konvge,
 		 int kcount, int *icount, int *numres, int *ifault);
-	void ComputeMLEstimatesViaHardEM();
+	void FitAGMModelViaHardEM();
 	void ComputeInitialEstimateOfModelParameters();
 	void TransformRootedTreeToBifurcatingTree();
 	void SwapRoot();
@@ -1150,12 +1153,14 @@ public:
 	void StoreEdgeListAndSeqToAdd();
 	void SelectIndsOfVerticesOfInterestAndEdgesOfInterest();
 	void RenameHiddenVerticesInEdgesOfInterestAndSetIdsOfVerticesOfInterest();
+	void SetAncestralSequencesString();
 	void SetWeightedEdgesToAddToGlobalPhylogeneticTree();	
 	void ComputeVertexLogLikelihood(SEM_vertex * v);
 	void ComputeEdgeLogLikelihood(SEM_vertex * u, SEM_vertex * v);	
 	void SetEdgeAndVertexLogLikelihoods();
 	bool IsNumberOfNonSingletonComponentsGreaterThanZero();
 	void WriteTree();
+	void WriteAncestralSequences();
 	void WriteRootedTreeInNewickFormat(string newickFileName);
 	void WriteUnrootedTreeInNewickFormat(string newickFileName);
 	void WriteCliqueTreeToFile(string cliqueTreeFileName);
@@ -1261,6 +1266,36 @@ void SEM::SetWeightedEdgesToAddToGlobalPhylogeneticTree() {
 	}
 }
 
+void SEM::SetAncestralSequencesString(){
+	vector <SEM_vertex *> verticesOfInterest;
+	int u_id; int v_id;
+	vector <unsigned char> fullSeq;
+	string DNAString;
+	SEM_vertex * u;	SEM_vertex * v;
+	this->ancestralSequencesString = "";
+	for (pair <int, int> edge_ind : this->edgesOfInterest_ind) {
+		tie(u_id, v_id) = edge_ind;		
+		u = (*this->vertexMap)[u_id];		
+		v = (*this->vertexMap)[v_id];
+		if (!u->observed and find(verticesOfInterest.begin(),verticesOfInterest.end(),u)==verticesOfInterest.end()) {
+			fullSeq = DecompressSequence(&(u->compressedSequence),&(this->sitePatternRepetitions));
+			DNAString = EncodeAsDNA(fullSeq);	
+			this->ancestralSequencesString += ">"; 
+			this->ancestralSequencesString += u->name + "\n";
+			this->ancestralSequencesString += DNAString + "\n";
+			verticesOfInterest.push_back(u);
+			
+		}		
+		if (!v->observed and find(verticesOfInterest.begin(),verticesOfInterest.end(),v)==verticesOfInterest.end()) {
+			fullSeq = DecompressSequence(&(v->compressedSequence),&(this->sitePatternRepetitions));
+			DNAString = EncodeAsDNA(fullSeq);
+			this->ancestralSequencesString += ">"; 
+			this->ancestralSequencesString += v->name + "\n";
+			this->ancestralSequencesString += DNAString + "\n";
+			verticesOfInterest.push_back(v);
+		}		
+	}	
+}
 
 
 void SEM::SetNeighborsBasedOnParentChildRelationships() {
@@ -1670,7 +1705,7 @@ Matrix4f SEM::GetTransitionMatrix(SEM_vertex * p, SEM_vertex * c) {
 }
 
 
-void SEM::ComputeMLEstimatesViaHardEM() {
+void SEM::FitAGMModelViaHardEM() {
 	this->ClearAncestralSequences();
 	this->ComputeMPEstimateOfAncestralSequences();
 	// Iterate till convergence of logLikelihood;
@@ -1693,13 +1728,19 @@ void SEM::ComputeMLEstimatesViaHardEM() {
 			continueEM = 0;
 		}
 		currentLogLikelihood = this->logLikelihood;
-		cout << "current logLikelihood is " << currentLogLikelihood << endl;
+//		cout << "current logLikelihood is " << currentLogLikelihood << endl;
 	}
 }
 
 void SEM::WriteTree() {
 	this->WriteRootedTreeAsEdgeList(this->sequenceFileName + ".edges");
 	this->WriteRootedTreeInNewickFormat(this->sequenceFileName + ".newick");
+}
+
+void SEM::OpenAncestralSequencesFile() {
+}
+
+void SEM::WriteAncestralSequences() {		
 }
 
 void SEM::WriteRootedTreeInNewickFormat(string newickFileName) {
@@ -1824,10 +1865,56 @@ void SEM::RootTreeAlongAnEdgePickedAtRandom() {
 	this->RootTreeAlongEdge(u,v);
 }
 
+void SEM::SelectEdgeIncidentToVertexViaMLUnderGMModel(SEM_vertex * v_opt) {
+	// Add a new vertex 
+	cout << "Current log likelihood is " << this->logLikelihood << endl;
+	vector <unsigned char> sequence;
+	SEM_vertex * r = new SEM_vertex(-1,sequence);
+	this->vertexMap->insert(make_pair(-1,r));
+	SEM_vertex * v = v_opt;
+	this->root = r;
+	vector <pair <SEM_vertex *, SEM_vertex *> > edgesForRooting;
+	for (SEM_vertex * n : v->neighbors) {
+		edgesForRooting.push_back(make_pair(n,v));
+	}
+	pair <SEM_vertex *, SEM_vertex *> selectedEdge;
+	double maxLogLikelihood = this->logLikelihood; 
+	int numberOfEdgesTried = 0;
+	for (pair <SEM_vertex *, SEM_vertex *> edge : edgesForRooting) {
+		this->RootTreeAlongEdge(edge.first, edge.second);
+		this->FitAGMModelViaHardEM();
+		numberOfEdgesTried += 1;
+		if (this->logLikelihood > maxLogLikelihood or numberOfEdgesTried == 1) {
+			selectedEdge = edge;
+			maxLogLikelihood = this->logLikelihood;
+			this->StoreTransitionMatrices();
+			this->StoreRootAndRootProbability();
+			this->StoreDirectedEdgeList();
+		}
+	}
+	this->RestoreTransitionMatrices();
+	this->RestoreRootAndRootProbability();
+	this->RestoreDirectedEdgeList();
+	this->logLikelihood = maxLogLikelihood;
+}
+
 void SEM::RootTreeAlongEdge(SEM_vertex * u, SEM_vertex * v) {
+	// Remove lengths of edges incident to root if necessary
+	if (this->root->children.size() == 2) {
+		SEM_vertex * c_l = this->root->children[0];
+		SEM_vertex * c_r = this->root->children[1];
+		this->edgeLengths.erase(make_pair(this->root,c_l));
+		this->edgeLengths.erase(make_pair(this->root,c_r));
+	}
+	this->ClearDirectedEdges();
 	SEM_vertex * c;
 	this->root->AddChild(u);
 	this->root->AddChild(v);
+	
+	SEM_vertex * c_l = this->root->children[0];
+	SEM_vertex * c_r = this->root->children[1];
+	this->edgeLengths.insert(make_pair(make_pair(this->root,c_l),0.001));
+	this->edgeLengths.insert(make_pair(make_pair(this->root,c_r),0.001));	
 	u->AddParent(this->root);
 	v->AddParent(this->root);
 	vector <SEM_vertex *> verticesToVisit;
@@ -2089,6 +2176,7 @@ void SEM::ComputeExpectedCountsForRootSearch() {
 		cout << "Debug computing expected counts" << endl;
 	}
 // Iterate over sites
+	// parallelize here if needed
 	for (int site = 0; site < this->numberOfSitePatterns; site++) {
 		this->cliqueT->SetSite(site);		
 		this->cliqueT->InitializePotentialAndBeliefs();		
@@ -2100,8 +2188,10 @@ void SEM::ComputeExpectedCountsForRootSearch() {
 }
 
 void SEM::ComputeMAPEstimateOfAncestralSequencesUsingCliques() {
+	this->logLikelihood = 0;
 	this->ClearAncestralSequences();
 	this->ConstructCliqueTree();
+	clique * rootClique = this->cliqueT->root;
 	SEM_vertex * v;
 	map <SEM_vertex *, int> verticesVisitedMap;
 	array <float, 4> posteriorProbability;
@@ -2111,6 +2201,13 @@ void SEM::ComputeMAPEstimateOfAncestralSequencesUsingCliques() {
 		this->cliqueT->SetSite(site);		
 		this->cliqueT->InitializePotentialAndBeliefs();		
 		this->cliqueT->CalibrateTree();
+		this->logLikelihood += rootClique->logScalingFactorForClique * this->sitePatternWeights[site];
+//		logLikelihood_c0 + = C_1->logScalingFactorForClique * this->sitePatternWeights[site];
+//		for (int i = 0; i < 4; i ++) {
+//			for (int j = 0; j < 4; j ++) {
+//				
+//			}
+//		}
 		verticesVisitedMap.clear();
 		for (clique * C: this->cliqueT->cliques) {
 			v = C->x;
@@ -2701,7 +2798,7 @@ void SEM::ComputeLogLikelihood() {
 		siteLikelihood = 0; 							
 		for (int dna = 0; dna < 4; dna++) {
 			currentProb = this->rootProbability[dna]*conditionalLikelihoodMap[this->root][dna];
-			siteLikelihood += currentProb;					
+			siteLikelihood += currentProb;
 		}
 //		if (site == 0) {
 //			cout << "Root probability is" << endl;
@@ -2999,7 +3096,7 @@ void SEM::OptimizeParametersForMultiRateMarkovModel() {
 		if (verbose) {
 			cout << "Expected loglikelihood for iteration " << iter << " is " << this->logLikelihood << endl;
 		}		
-		if ((this->logLikelihood > logLikelihood_current and (abs(this->logLikelihood - logLikelihood_current) > 0.001)) or (iter < 2 and iter < maxIter)) {
+		if ((this->logLikelihood > logLikelihood_current and (abs(this->logLikelihood - logLikelihood_current) > this->logLikelihoodConvergenceThreshold)) or (iter < 2 and iter < maxIter)) {
 			logLikelihood_current = this->logLikelihood;
 		} else {
 			continueIterations = 0;
@@ -3093,6 +3190,9 @@ void SEM::OptimizeTopologyAndParametersOfGMM() {
 	// Replace following step with clique tree calibration
 	// and marginalizing clique belief		
 	this->ComputeMAPEstimateOfAncestralSequencesUsingCliques();	
+//	cout << "Log likelihood computed using clique tree is " << this->logLikelihood << endl;
+	this->ComputeLogLikelihood();
+//	cout << "Log likelihood computed using tree pruning algorithm is " << this->logLikelihood << endl;
 //	cout << "Finished computing MAP estimates using cliques" << endl;
 	this->SetNeighborsBasedOnParentChildRelationships();	
 //	cout << "Computed MAP estimate of ancestral sequences" << endl;
@@ -3156,14 +3256,15 @@ void SEM::RootTreeByFittingAGMMViaEM() {
 		if (verbose) {
 			cout << "Expected loglikelihood for iteration " << iter << " is " << this->logLikelihood << endl;
 		}		
-		if ((this->logLikelihood > logLikelihood_current and (abs(this->logLikelihood - logLikelihood_current) > 0.001)) or (iter < 2 and iter < maxIter)) {
+		if ((this->logLikelihood > logLikelihood_current and (abs(this->logLikelihood - logLikelihood_current) > this->logLikelihoodConvergenceThreshold)) or (iter < 2 and iter < maxIter)) {
 			logLikelihood_current = this->logLikelihood;
 		} else {
 			continueIterations = 0;
 		}
 //		}
 //	 continueIterations = 0;
-	}	
+	}
+	this->ComputeLogLikelihood();	
 }
 
 void SEM::RootTreeBySumOfExpectedLogLikelihoods() {
@@ -4072,7 +4173,7 @@ void SEM::OptimizeQAndtForRateCategory(int rateCat) {
 		iter += 1;
 		this->OptimizeQForRateCategory(rateCat);
 		this->OptimizetForRateCategory(rateCat);
-		if ((this->logLikelihood > logLikelihood_current and (abs(this->logLikelihood - logLikelihood_current) > 0.01)) or (iter < 2 and iter < maxIter)) {
+		if ((this->logLikelihood > logLikelihood_current and (abs(this->logLikelihood - logLikelihood_current) > this->logLikelihoodConvergenceThreshold)) or (iter < 2 and iter < maxIter)) {
 			logLikelihood_current = this->logLikelihood;
 		} else {
 			convergenceNotReached = 0;
@@ -4398,7 +4499,7 @@ void SEM::ClearAllEdges() {
 		v->neighbors.clear();
 		v->degree = 0;
 		v->inDegree = 0;
-		v->outDegree = 0;		
+		v->outDegree = 0;	
 	}
 }
 
@@ -4445,7 +4546,7 @@ void SEM::ComputeMLEOfRootProbability() {
 
 void SEM::ComputeMLEOfTransitionMatrices() {
 	SEM_vertex * c; SEM_vertex * p;
-	bool debug = 1;
+	bool debug = 0;
 	for (pair <int, SEM_vertex *> idPtrPair : * this->vertexMap){
 		c = idPtrPair.second;
 		p = c->parent;

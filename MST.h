@@ -53,7 +53,9 @@ private:
 	int edgeWeightThreshold = 0;
 	vector <MST_vertex*> verticesToVisit;
 	bool ContainsVertex(int vertex_id);
+	map <pair<int,int>,int> * allEdgeWeights;
 public:
+	int maxDegree;
 	vector <int> siteWeights;
 	string sequenceFileName;
 	int v_ind;
@@ -65,6 +67,10 @@ public:
 	MST_vertex * subtree_v_ptr;
 	map <int, MST_vertex *> * vertexMap;
 	map <pair <int, int>, int> edgeWeightsMap;
+	void AddEdgeWeight(int u_id, int v_id, int edgeWeight);
+	void RemoveEdgeWeight(int u_id, int v_id);
+	void AddEdgeWeightToDistanceGraph(int u_id, int v_id, int edgeWeight);
+	void RemoveWeightedEdgesIncidentToVertexInDistanceGraph(int u_id);
 	void SetCompressedSequencesAndSiteWeightsForInputSequences();
 	void SetNumberOfLargeEdgesThreshold(int numberOfLargeEdges);
 	void SetEdgeWeightThreshold(int edgeWeight){edgeWeightThreshold = edgeWeight;}
@@ -75,6 +81,8 @@ public:
 	void RemoveEdge(int u_id, int v_id);
 	void ResetVertexAttributesForSubtreeSearch();
 	void UpdateMSTWithMultipleExternalVertices(vector <int> idsOfVerticesToKeep, vector <int> idsOfVerticesToRemove, vector <tuple<int,string,vector<unsigned char>>> idAndNameAndSeqTupleForVerticesToAdd, vector <int> idsOfExternalVertices);
+    void UpdateMSTWithMultipleExternalVertices_simple(vector <int> idsOfVerticesToKeep, vector <int> idsOfVerticesToRemove, vector <tuple<int,string,vector<unsigned char>>> idAndNameAndSeqTupleForVerticesToAdd, vector <int> idsOfExternalVertices);	
+	void UpdateMaxDegree();
 	void UpdateMSTWithOneExternalVertex(vector <int> idsOfVerticesToRemove, string nameOfSequenceToAdd, vector <unsigned char> sequenceToAdd);
 	bool ContainsEdge(int u_id, int v_id);
 	int GetEdgeWeight(int u_id, int v_id);	
@@ -96,6 +104,7 @@ public:
 		this->sequenceFileName = sequenceFileNameToSet;
 		this->v_ind = 0;
 		vector <unsigned char> emptySequence;
+		this->allEdgeWeights = new map <pair<int,int>,int> ; 
 		this->vertexMap = new map <int, MST_vertex *>;
 		mapDNAtoInteger["A"] = 0;
 		mapDNAtoInteger["C"] = 1;
@@ -107,8 +116,21 @@ public:
 			delete VptrMap.second;
 		}
 		delete this->vertexMap;
+		delete this->allEdgeWeights;
 	}
 };
+
+void MST_tree::AddEdgeWeightToDistanceGraph(int u_id, int v_id, int edgeWeight) {
+	if (u_id < v_id) {
+		this->allEdgeWeights->insert(make_pair(make_pair(u_id,v_id),edgeWeight));
+	} else {
+		this->allEdgeWeights->insert(make_pair(make_pair(v_id,u_id),edgeWeight));
+	}
+}
+
+void MST_tree::RemoveWeightedEdgesIncidentToVertexInDistanceGraph(int u_id) {
+	
+}
 
 void MST_tree::SetIdsOfExternalVertices() {
 	this->idsOfExternalVertices.clear();
@@ -130,6 +152,7 @@ void MST_tree::SetNumberOfLargeEdgesThreshold(int numberOfLargeEdges_toSet) {
 
 bool MST_tree::ShouldIComputeALocalPhylogeneticTree() {
 	bool valueToReturn;
+	bool verbose = 0;
 	bool subtreeExtractionPossible;
 	int numberOfNonZeroWeightEdgesInVmWithoutVs;
 	tie (subtreeExtractionPossible, this->subtree_v_ptr) = this->GetPtrToVertexSubtendingSubtree();	
@@ -138,9 +161,16 @@ bool MST_tree::ShouldIComputeALocalPhylogeneticTree() {
 		if (numberOfNonZeroWeightEdgesInVmWithoutVs > this->numberOfLargeEdgesThreshold) {
 			valueToReturn = 1;			
 		} else {
+			if (verbose) {
+				cout << "Case 1: subtree extraction possible but number of external vertices is too small" << endl;
+			}
 			valueToReturn = 0;
+			
 		}
 	} else {
+		if (verbose) {
+			cout << "Case 1: subtree extraction is not possible" << endl;
+		}
 		valueToReturn = 0;
 	}
 	return (valueToReturn);
@@ -207,12 +237,13 @@ void MST_tree::AddEdge(int u_id, int v_id, int edgeWeight) {
 	MST_vertex* u_ptr = (*this->vertexMap)[u_id];
 	MST_vertex* v_ptr = (*this->vertexMap)[v_id];
 	u_ptr->AddNeighbor(v_ptr);
-	v_ptr->AddNeighbor(u_ptr);		
-	if (u_id < v_id) {
-		this->edgeWeightsMap[pair<int,int>(u_id,v_id)] = edgeWeight;
-	} else { 
-		this->edgeWeightsMap[pair<int,int>(v_id,u_id)] = edgeWeight;
-	}
+	v_ptr->AddNeighbor(u_ptr);
+	this->AddEdgeWeight(u_id,v_id,edgeWeight);
+//	if (u_id < v_id) {
+//		this->edgeWeightsMap[pair<int,int>(u_id,v_id)] = edgeWeight;
+//	} else { 
+//		this->edgeWeightsMap[pair<int,int>(v_id,u_id)] = edgeWeight;
+//	}
 	if (edgeWeight > 0) {
 		this->numberOfNonZeroWeightEdges += 1;
 	}
@@ -246,6 +277,30 @@ int MST_tree::GetEdgeWeight(int u_id, int v_id) {
 	} else {
 		return this->edgeWeightsMap[pair<int,int>(v_id,u_id)];
 	}
+}
+
+void MST_tree::AddEdgeWeight(int u_id, int v_id, int edgeWeight) {
+	pair<int,int> edge ;
+	if (u_id < v_id){
+		edge = make_pair(u_id,v_id);
+	} else {
+		edge = make_pair(v_id,u_id);
+	}
+	if (this->edgeWeightsMap.find(edge) != this->edgeWeightsMap.end()) {
+		this->edgeWeightsMap[edge] = edgeWeight;
+	} else {
+		this->edgeWeightsMap.insert(make_pair(edge,edgeWeight));
+	}	
+}
+
+void MST_tree::RemoveEdgeWeight(int u_id, int v_id) {
+	pair <int, int> edge;
+	if (u_id < v_id){
+		edge = make_pair(u_id,v_id);
+	} else {
+		edge = make_pair(v_id,u_id);
+	}
+	this->edgeWeightsMap.erase(edge);
 }
 
 vector<int> MST_tree::GetIdsOfClosestUnvisitedVertices(MST_vertex* v_ptr) {
@@ -418,11 +473,36 @@ void MST_tree::UpdateMSTWithOneExternalVertex(vector<int> idsOfVerticesToRemove,
 	}	
 }
 
+void MST_tree::UpdateMaxDegree() {
+	this->maxDegree = 0;
+	for (pair <int,MST_vertex*> VIdAndPtr: *this->vertexMap) {
+		if (this->maxDegree	< VIdAndPtr.second->degree) {
+			this->maxDegree	= VIdAndPtr.second->degree;
+		}
+	}
+}
+
+void MST_tree::UpdateMSTWithMultipleExternalVertices_simple(vector<int> idsOfVerticesToKeep, vector<int> idsOfVerticesToRemove, vector<tuple<int,string,vector<unsigned char>>> idAndNameAndSeqTupleForVerticesToAdd, vector<int> idsOfExternalVertices) {	
+	// Remove weights of edges incident to vertices to removess
+	// Add weights of edges 
+	// Remove vertices
+	
+}
+
 void MST_tree::UpdateMSTWithMultipleExternalVertices(vector<int> idsOfVerticesToKeep, vector<int> idsOfVerticesToRemove, vector<tuple<int,string,vector<unsigned char>>> idAndNameAndSeqTupleForVerticesToAdd, vector<int> idsOfExternalVertices) {
+	// Remove weights of edges incident to vertex
+//	MST_vertex * v;
+//	for (int v_id: idsOfVerticesToRemove) {
+//		v = (*this->vertexMap)[v_id];
+//		for (MST_vertex * n: v->neighbors) {
+//			this->RemoveEdgeWeight(n->id, v_id);
+//		}	
+//	}	
 	//	Remove vertices		
 	for (int v_id: idsOfVerticesToRemove) {
 		this->RemoveVertex(v_id);
 	}
+//	int numOfEdgesInCurrentMST = (int) this->edgeWeightsMap.size();
 	//	Remove all edges in MST and reset all attributes for each vertex
 	for (pair <int,MST_vertex*> VIdAndPtr: *this->vertexMap) {
 		VIdAndPtr.second->numberOfLargeEdgesInSubtree = 0;
@@ -447,11 +527,12 @@ void MST_tree::UpdateMSTWithMultipleExternalVertices(vector<int> idsOfVerticesTo
 			for (int v_ind = u_ind + 1; v_ind < numberOfVerticesToAdd; v_ind++) {
 				tie (v_id, v_name, seq_v) = idAndNameAndSeqTupleForVerticesToAdd[v_ind];
 				edgeWeight = ComputeHammingDistance(seq_u, seq_v);
-				if (u_id < v_id){
-					this->edgeWeightsMap[pair<int,int>(u_id,v_id)] = edgeWeight;
-				} else {
-					this->edgeWeightsMap[pair<int,int>(v_id,u_id)] = edgeWeight;
-				}
+				this->AddEdgeWeight(u_id,v_id,edgeWeight);
+//				if (u_id < v_id){
+//					this->edgeWeightsMap[pair<int,int>(u_id,v_id)] = edgeWeight;
+//				} else {
+//					this->edgeWeightsMap[pair<int,int>(v_id,u_id)] = edgeWeight;
+//				}
 			}
 		}
 	}
@@ -467,11 +548,12 @@ void MST_tree::UpdateMSTWithMultipleExternalVertices(vector<int> idsOfVerticesTo
 			v_id = idsOfExternalVertices[v_ind];
 			seq_v = (*this->vertexMap)[v_id]->sequence;
 			edgeWeight = ComputeHammingDistance(seq_u,seq_v);
-			if (u_id < v_id){
-				this->edgeWeightsMap[pair<int,int>(u_id,v_id)] = edgeWeight;
-			} else {
-				this->edgeWeightsMap[pair<int,int>(v_id,u_id)] = edgeWeight;
-			}
+			this->AddEdgeWeight(u_id,v_id,edgeWeight);
+//			if (u_id < v_id){
+//				this->edgeWeightsMap[pair<int,int>(u_id,v_id)] = edgeWeight;
+//			} else {
+//				this->edgeWeightsMap[pair<int,int>(v_id,u_id)] = edgeWeight;
+//			}
 		}
 	}
 	
@@ -482,11 +564,12 @@ void MST_tree::UpdateMSTWithMultipleExternalVertices(vector<int> idsOfVerticesTo
 			v_id = idsOfVerticesToKeep[v_ind];
 			seq_v = (*this->vertexMap)[v_id]->sequence;
 			edgeWeight = ComputeHammingDistance(seq_u,seq_v);
-			if (u_id < v_id){
-				this->edgeWeightsMap[pair<int,int>(u_id,v_id)] = edgeWeight;
-			} else {
-				this->edgeWeightsMap[pair<int,int>(v_id,u_id)] = edgeWeight;
-			}			
+			this->AddEdgeWeight(u_id,v_id,edgeWeight);
+//			if (u_id < v_id){
+//				this->edgeWeightsMap[pair<int,int>(u_id,v_id)] = edgeWeight;
+//			} else {
+//				this->edgeWeightsMap[pair<int,int>(v_id,u_id)] = edgeWeight;
+//			}			
 		}		
 	}
 
@@ -498,27 +581,48 @@ void MST_tree::UpdateMSTWithMultipleExternalVertices(vector<int> idsOfVerticesTo
 			v_id = idsOfExternalVertices[v_ind];
 			seq_v = (*this->vertexMap)[v_id]->sequence;
 			edgeWeight = ComputeHammingDistance(seq_u,seq_v);
-			if (u_id < v_id){
-				this->edgeWeightsMap[pair<int,int>(u_id,v_id)] = edgeWeight;
-			} else {
-				this->edgeWeightsMap[pair<int,int>(v_id,u_id)] = edgeWeight;
-			}			
-		}		
+			this->AddEdgeWeight(u_id,v_id,edgeWeight);
+//			if (u_id < v_id){
+//				this->edgeWeightsMap[pair<int,int>(u_id,v_id)] = edgeWeight;
+//			} else {
+//				this->edgeWeightsMap[pair<int,int>(v_id,u_id)] = edgeWeight;
+//			}
+		}
 	}
 	
-	int numberOfVertices = int(this->vertexMap->size());	
-	const int numberOfEdges = int(this->edgeWeightsMap.size());
+	// number of edges should be 
 	
+	vector <int> mstIds;
+//	map<pair<int,int>> primId2MSTId;
+	map<int,int> mstId2PrimId;
+	int primId = 0;
+	int mstId;
+	for (pair <int,MST_vertex*> idPtrPair : *this->vertexMap) {
+		mstId = idPtrPair.first;
+//		if (find(mstIds.begin(),mstIds.end(),mstId) == mstIds.end()) {
+		mstIds.push_back(mstId);
+		mstId2PrimId.insert(make_pair(mstId,primId));
+		primId += 1;
+//		}
+	}
+	int numberOfVertices = int(this->vertexMap->size());	
+	assert(primId == numberOfVertices);
+	const int numberOfEdges = int(this->edgeWeightsMap.size());
+//	cout << "Number of vertices in distance graph is " << numberOfVertices << endl;
+//	cout << "number of edges in distance graph is " << numberOfEdges << endl;
 	int * weights;
 	weights = new int [numberOfEdges];
 	
 	typedef pair <int,int > E;
 	E * edges;
 	edges = new E [numberOfEdges];
+		
 	
-	int edgeIndex = 0;
+	int edgeIndex = 0;	
     for (pair<pair<int,int>,int> edgeAndWeight : this->edgeWeightsMap) {
-		edges[edgeIndex] = E(edgeAndWeight.first.first,edgeAndWeight.first.second);
+//		edges[edgeIndex] = E(edgeAndWeight.first.first,edgeAndWeight.first.second);
+		tie (u_id, v_id) = edgeAndWeight.first;
+		edges[edgeIndex] = E(mstId2PrimId[u_id],mstId2PrimId[v_id]);
 		weights[edgeIndex] = edgeAndWeight.second;
 		edgeIndex += 1;		
 	}
@@ -526,21 +630,57 @@ void MST_tree::UpdateMSTWithMultipleExternalVertices(vector<int> idsOfVerticesTo
 	typedef boost::adjacency_list < boost::vecS, boost::vecS, boost::undirectedS, boost::property<boost::vertex_distance_t, int>, boost::property < boost::edge_weight_t, int> > Graph;
 	Graph g(edges, edges + numberOfEdges, weights, numberOfVertices);
 	vector < boost::graph_traits < Graph >::vertex_descriptor >  p(num_vertices(g));
+	
+//	int start_vertex_for_prim = 0;
+//	for (pair<pair<int,int>,int> edgeAndWeight : this->edgeWeightsMap) {
+//		start_vertex_for_prim = edgeAndWeight.first.second;
+//		break;
+//	}	
+//	cout << "start vertex for prim is \t" << start_vertex_for_prim << endl;
 	prim_minimum_spanning_tree(g, &p[0]);
-	delete[] edges;		
-	delete[] weights;		
+		
 	vector <pair<int,int>> edgeWeightsToKeep;	
 	vector <pair<int,int>> edgeWeightsToRemove;	
+//	if (this->maxDegree == 0) {
+//	cout << "edges in updated MST are" << endl;				
+//	}
 	for (size_t u = 0; u != p.size(); ++u) {
-		if (p[u] != u){		
-			this->AddEdge(u,p[u],this->GetEdgeWeight(u,p[u]));
-			if (u < p[u]){
-				edgeWeightsToKeep.push_back(pair<int,int>(u,p[u]));
+//		if (this->maxDegree == 0) {
+//			cout << p[u] << "\t" << u << endl;				
+//		}		
+		if (p[u] != u){
+			u_id = mstIds[p[u]];
+			v_id = mstIds[u];
+//			this->AddEdge(u,p[u],this->GetEdgeWeight(u,p[u]));
+			this->AddEdge(u_id,v_id,this->GetEdgeWeight(u_id,v_id));
+			if (u_id < v_id){
+				edgeWeightsToKeep.push_back(pair<int,int>(u_id,v_id));
 			} else {
-				edgeWeightsToKeep.push_back(pair<int,int>(p[u],u));
+				edgeWeightsToKeep.push_back(pair<int,int>(v_id,u_id));
 			}
 		}
 	}
+//	cout << "-----------------------------" << endl;
+	this->UpdateMaxDegree();
+	
+	
+//	cout << "maximum degree is " << this->maxDegree << endl;
+//	cout << "largest element in weights is " << *max_element(weights,weights+this->edgeWeightsMap.size()) << endl;
+	if (this->maxDegree == 0) {
+		ofstream edgeListFile;
+		edgeListFile.open(sequenceFileName+".debugEdgeList");
+		for (pair<pair<int,int>,int> edgeAndWeight : this->edgeWeightsMap) {
+			edgeListFile << edgeAndWeight.first.first << "\t";
+			edgeListFile << edgeAndWeight.first.second << "\t";
+			edgeListFile << edgeAndWeight.second << endl;
+		}
+//	cout << "number of edges to keep is " << edgeWeightsToKeep.size() << endl;	
+//	cout << "largest element in weights is " << *max_element(weights,weights+this->edgeWeightsMap.size()) << endl;
+		edgeListFile.close();
+	}
+	
+	delete[] edges;
+	delete[] weights;
 	for (pair<pair<int,int>,int> edgeAndWeight : this->edgeWeightsMap) {
 		if (find(edgeWeightsToKeep.begin(),edgeWeightsToKeep.end(),edgeAndWeight.first) == edgeWeightsToKeep.end()){
 			edgeWeightsToRemove.push_back(edgeAndWeight.first);
@@ -549,6 +689,9 @@ void MST_tree::UpdateMSTWithMultipleExternalVertices(vector<int> idsOfVerticesTo
 	for (pair<int,int> edge: edgeWeightsToRemove) {
 		this->edgeWeightsMap.erase(edge);
 	}
+//	cout << "Number of vertices after MST update is " << this->vertexMap->size() << endl;
+//	cout << "Number of edges after MST update is " << this->edgeWeightsMap.size() << endl;
+//	this->UpdateMaxDegree();
 }
 
 tuple <vector<string>,vector<vector<unsigned char>>,vector<int>,vector<vector<int>>> MST_tree::GetCompressedSequencesSiteWeightsAndSiteRepeats(vector<int> vertexIdList){	
@@ -719,6 +862,7 @@ void MST_tree::ComputeMST() {
 //			MSTFile << (*this->vertexMap)[u]->name << "\t" << (*this->vertexMap)[p[u]]->name << "\t" << weights[edgeIndex] << endl;
 		}
 	}
+	this->UpdateMaxDegree();
 //	MSTFile.close();
 	delete[] weights;
 }
