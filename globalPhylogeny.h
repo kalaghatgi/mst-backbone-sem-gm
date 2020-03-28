@@ -2,6 +2,9 @@
 #define phylogeny_H
 #include <boost/algorithm/string.hpp>
 #include <tuple>
+#include <eigen3/Eigen/Dense>
+#include <eigen3/unsupported/Eigen/MatrixFunctions>
+#include"utilities.h"
 
 using namespace Eigen;
 
@@ -15,17 +18,17 @@ public:
 	float vertexLogLikelihood;	
 	float sumOfEdgeLogLikelihoods;
 	bool observed;
-	string name;
-	string newickLabel;
-	vector <unsigned char> fullSequence;
-	vector <unsigned char> compressedSequence;
+	std::string name;
+	std::string newickLabel;
+	std::vector <unsigned char> fullSequence;
+	std::vector <unsigned char> compressedSequence;
 	vertex * parent;
-	vector <vertex *> neighbors;	
-	vector <vertex *> children;
+	std::vector <vertex *> neighbors;	
+	std::vector <vertex *> children;
 	void AddNeighbor(vertex * v);
 	void AddParent(vertex * v);
 	void AddChild(vertex * v);
-	vertex (string v_name, vector <unsigned char> sequenceToAdd) {
+	vertex (std::string v_name, std::vector <unsigned char> sequenceToAdd) {
 		this->name = v_name;
 		this->fullSequence = sequenceToAdd;
 		this->newickLabel = "";
@@ -62,27 +65,27 @@ void vertex::AddChild(vertex * v) {
 class globalPhylogeny {
 public:
 	vertex * root;
-	string sequenceFileName;
-	vector <int> siteWeights;
-	map <pair<vertex *, vertex *>, float> edgeLengths;
-	map <pair<vertex *, vertex *>, float> edgeLogLikelihoods;
+	std::string sequenceFileName;
+	std::vector <int> siteWeights;
+	std::map <std::pair<vertex *, vertex *>, float> edgeLengths;
+	std::map <std::pair<vertex *, vertex *>, float> edgeLogLikelihoods;
 	float sequenceLength;
 	void CompressSequencesAndSetSiteWeights();
 	void SetExpectedCounts();
-	map <pair<vertex *, vertex *>,Matrix4f> expectedCountsForVertexPair;
-	map <vertex *, array <float, 4>> expectedCountsForVertex;
+	std::map <std::pair<vertex *, vertex *>,Matrix4f> expectedCountsForVertexPair;
+	std::map <vertex *, std::array <float, 4>> expectedCountsForVertex;
 	void PerformModelSelection();
-	void AddSequences(map<string,vector<unsigned char>> compressedSequencesList, vector <vector <int>> sitePatternRepeats);	
-	void ParseEdgeListString(string weightedEdgeList);
-	void AddWeightedEdges(vector<tuple<string,string,float>> weightedEdges);
+	void AddSequences(std::map<std::string,std::vector<unsigned char>> compressedSequencesList, std::vector <std::vector <int>> sitePatternRepeats);	
+	void ParseEdgeListString(std::string weightedEdgeList);
+	void AddWeightedEdges(std::vector<std::tuple<std::string,std::string,float>> weightedEdges);
 	void SelectVertexForRooting();	
 	void ComputeEdgeLoglikelihood(vertex * u, vertex * v);
 	void ComputeEdgeLength(vertex * u, vertex * v);
-	array <float, 4> GetProbabilityDistribution(vertex * u);
+	std::array <float, 4> GetProbabilityDistribution(vertex * u);
 	Matrix4f GetTransitionProbability(vertex * u, vertex * v);
 	void ComputeVertexLoglikelihood(vertex * u);
-	void AddVertex(string v_name, vector<unsigned char> fullSequence);
-	bool ContainsVertex(string v_name);
+	void AddVertex(std::string v_name, std::vector<unsigned char> fullSequence);
+	bool ContainsVertex(std::string v_name);
 	void AddUndirectedEdge(vertex * u, vertex * v, float edgeLength);
 	void AddDirectedEdge(vertex * u, vertex * v, float edgeLength);
 	void RootTree();
@@ -90,11 +93,11 @@ public:
 	void ComputeNewickLabel();
 	void WriteNewickLabel();
 	void WriteEdges();
-	vector <pair<vertex *, vertex *>> edgesForPreOrderTreeTraversal;
-	vector <pair<vertex *, vertex *>> edgesForPostOrderTreeTraversal;
-	vector <vertex *> preOrderVerticesWithoutLeaves;
-	vector <vertex *> leaves;	
-	vector <vertex *> nonLeafVertices;
+	std::vector <std::pair<vertex *, vertex *>> edgesForPreOrderTreeTraversal;
+	std::vector <std::pair<vertex *, vertex *>> edgesForPostOrderTreeTraversal;
+	std::vector <vertex *> preOrderVerticesWithoutLeaves;
+	std::vector <vertex *> leaves;	
+	std::vector <vertex *> nonLeafVertices;
 	void ResetParentChildRelationships();
 	void SetEdgesForPreOrderTraversal();
 	void SetVerticesForPreOrderTraversalWithoutLeaves();
@@ -102,13 +105,13 @@ public:
 	void SetLeavesAndNonLeafVertices();	
 	float GetEdgeLength(vertex * u, vertex * v);
 	void ResetTimesVisited();
-	map <string,vertex *> vertices;
-	globalPhylogeny (string sequenceFileNameToSet) {
+	std::map <std::string,vertex *> vertices;
+	globalPhylogeny (std::string sequenceFileNameToSet) {
 		this->sequenceFileName = sequenceFileNameToSet;
 		
 	}
 	~globalPhylogeny () {
-		for (pair<string,vertex *> nameAndPtr : this->vertices) {
+		for (std::pair<std::string,vertex *> nameAndPtr : this->vertices) {
 			delete nameAndPtr.second;			
 		}
 		this->vertices.clear();
@@ -118,15 +121,15 @@ public:
 float globalPhylogeny::GetEdgeLength(vertex * u, vertex * v) {
 	float t;
 	if (u < v) {
-		t = this->edgeLengths[make_pair(u,v)];
+		t = this->edgeLengths[std::make_pair(u,v)];
 	} else {
-		t = this->edgeLengths[make_pair(v,u)];
+		t = this->edgeLengths[std::make_pair(v,u)];
 	}
 	return (t);
 }
 
-array <float, 4> globalPhylogeny::GetProbabilityDistribution(vertex * u) {
-	array <float, 4> pi;
+std::array <float, 4> globalPhylogeny::GetProbabilityDistribution(vertex * u) {
+	std::array <float, 4> pi;
 	for (int i = 0; i < 4; i ++) {
 		pi[i] = 0.0;
 	}
@@ -172,10 +175,10 @@ void globalPhylogeny::ComputeEdgeLength(vertex * u, vertex * v) {
 		dna_v = v->fullSequence[site];
 		edgeLength += 1.0;		
 	}
-	cout << "Edge length before normalizing is " << edgeLength << endl;
+	std::cout << "Edge length before normalizing is " << edgeLength << std::endl;
 	edgeLength /= this->sequenceLength;
-	cout << "Edge length after normalizing is " <<  edgeLength << endl;
-	this->edgeLengths.insert(make_pair(make_pair(u,v),edgeLength));
+	std::cout << "Edge length after normalizing is " <<  edgeLength << std::endl;
+	this->edgeLengths.insert(std::make_pair(std::make_pair(u,v),edgeLength));
 	return;	
 }
 
@@ -188,12 +191,12 @@ void globalPhylogeny::ComputeEdgeLoglikelihood(vertex * u, vertex * v) {
 		dna_v = v->fullSequence[site];
 		edgeLoglikelihood += log(P(dna_u,dna_v));		
 	}
-	this->edgeLogLikelihoods.insert(make_pair(make_pair(u,v),edgeLoglikelihood));
+	this->edgeLogLikelihoods.insert(std::make_pair(std::make_pair(u,v),edgeLoglikelihood));
 	return;
 }
 
 void globalPhylogeny::ComputeVertexLoglikelihood(vertex * u) {
-	array <float, 4> pi = this->GetProbabilityDistribution(u);
+	std::array <float, 4> pi = this->GetProbabilityDistribution(u);
 	u->vertexLogLikelihood = 0;
 	int dna;
 	for (int site = 0; site < (int) this->sequenceLength; site ++ ) {
@@ -203,7 +206,7 @@ void globalPhylogeny::ComputeVertexLoglikelihood(vertex * u) {
 	return;
 }
 
-void globalPhylogeny::AddVertex(string v_name, vector <unsigned char> fullSequence) {
+void globalPhylogeny::AddVertex(std::string v_name, std::vector <unsigned char> fullSequence) {
 	vertex * v = new vertex(v_name, fullSequence);	
 	this->vertices[v_name] = v;
 	if(boost::algorithm::starts_with(v_name, "h_")){
@@ -215,7 +218,7 @@ void globalPhylogeny::AddVertex(string v_name, vector <unsigned char> fullSequen
 	return;
 }
 
-bool globalPhylogeny::ContainsVertex(string v_name) {
+bool globalPhylogeny::ContainsVertex(std::string v_name) {
 	bool returnValue;
 	if (this->vertices.find(v_name) == this->vertices.end()) {
 		returnValue = 0;
@@ -226,11 +229,11 @@ bool globalPhylogeny::ContainsVertex(string v_name) {
 }
 
 
-void globalPhylogeny::AddSequences(map<string,vector<unsigned char>> sequencesList, vector <vector <int>> sitePatternRepeats) {
-	string v_name;
-	vector <unsigned char> compressedSequence;
-	vector <unsigned char> fullSequence;	
-	for (pair <string, vector<unsigned char>> nameAndSeq : sequencesList) {
+void globalPhylogeny::AddSequences(std::map<std::string,std::vector<unsigned char>> sequencesList, std::vector <std::vector <int>> sitePatternRepeats) {
+	std::string v_name;
+	std::vector <unsigned char> compressedSequence;
+	std::vector <unsigned char> fullSequence;	
+	for (std::pair <std::string, std::vector<unsigned char>> nameAndSeq : sequencesList) {
 		v_name = nameAndSeq.first;		
 		if (!this->ContainsVertex(v_name)) {
 			compressedSequence = nameAndSeq.second;
