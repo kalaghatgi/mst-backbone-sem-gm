@@ -13,9 +13,9 @@
                 "-o",
                 "${fileDirname}/${fileBasenameNoExtension}",
                 "-I",
-                "${workspaceFolder}/eigen3",
+                "${workspaceFolder}/",
                 "-I",
-                "${workspaceFolder}/"
+                "${workspaceFolder}/eigen3"
             ],
             "options": {
                 "cwd": "/usr/bin"
